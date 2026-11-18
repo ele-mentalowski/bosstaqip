@@ -1,138 +1,127 @@
-                  <button onClick={()=>reset(ch)}><RefreshCw/>60dk Reset</button>
-                  <button onClick={()=>edit(r||{channel:ch})}><Clock3/>Saat Düzenle</button>
-                </div>
-              </article>
-            );
-          })}
-        </section>
-      ) : (
-        <section className="channels">
-          {CH.map(ch=>{
-            const r=invasionRows.find(x=>x.channel===ch);
-            const state=invasionClock(r,now);
-            const start=r?.cycle_started_at?new Date(r.cycle_started_at):null;
-            const phaseEnd=start
-              ?new Date(start.getTime()+(state.phase==='green'?INVASION_PHASE:INVASION_TOTAL)*1000)
-              :null;
-            const isRed=state.phase==='red';
-            return(
-              <article
-                key={ch}
-                className={`card ${isRed?'warning':'green'} ${isRed?'invasion-red':''}`}
-                style={isRed?{borderColor:'#ef4444',background:'rgba(239,68,68,.09)'}:undefined}
-              >
-                <div className="info">
-                  <div className="line">
-                    <b>{ch}</b>
-                    <span className="pill">{admin?'Admin':'berlin'}</span>
-                    <strong className="timer" style={isRed?{color:'#ef4444'}:undefined}>{state.phase==='idle'?'--:--':fmt(state.remaining)}</strong>
-                  </div>
-                  <div className="times">
-                    {state.phase==='idle'?'Kesim bekleniyor':isRed?(state.remaining===0?'Boss çıkmış olabilir · Kesim bekleniyor':'Boss çıkabilir'):'Boss çıkamaz'}
-                    {' · '}
-                    Başladı: {start?clock(start):'--:--:--'}{' '}
-                    Bitiş: {phaseEnd?clock(phaseEnd):'--:--:--'}
-                  </div>
-                </div>
-                <div className="actions">
-                  <button onClick={()=>invasionKilled(ch)}><RefreshCw/>Kesildi</button>
-                </div>
-              </article>
-            );
-          })}
-        </section>
-      )}
 
-      {modal==='edit'&&(
-        <div
-          className="shade"
-          onMouseDown={e=>e.target===e.currentTarget&&M('')}
-        >
-          <form className="dialog" onSubmit={save}>
-            <button
-              type="button"
-              className="close"
-              onClick={()=>M('')}
-            >
-              <X/>
-            </button>
+import React,{useCallback,useEffect,useRef,useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import {createClient} from '@supabase/supabase-js';
+import {
+  LogOut,Shield,Bell,BellOff,X,RefreshCw,Clock3,
+  Users,Plus,Trash2,KeyRound
+} from 'lucide-react';
+import './style.css';
 
-            <h2>{target} · Saat Düzenle</h2>
-            <p>Bossun kesildiği saati gir.</p>
+const URL=import.meta.env.VITE_SUPABASE_URL;
+const KEY=import.meta.env.VITE_SUPABASE_ANON_KEY;
+const db=URL&&KEY?createClient(URL,KEY):null;
+const CH=['CH1','CH2','CH3','CH4','CH5','CH6'];
+const D=3600;
+const INVASION_PHASE=80*60;
+const INVASION_TOTAL=INVASION_PHASE*2;
 
-            <input
-              type="time"
-              value={mins}
-              onChange={e=>Q(e.target.value)}
-              required
-            />
+const fmt=n=>`${String(Math.floor(Math.max(0,n)/60)).padStart(2,'0')}:${String(Math.max(0,n)%60).padStart(2,'0')}`;
 
-            <button className="primary wide">Kaydet</button>
-          </form>
-        </div>
-      )}
+const clock=d=>new Intl.DateTimeFormat('tr-TR',{
+  hour:'2-digit',
+  minute:'2-digit',
+  second:'2-digit',
+  hour12:false
+}).format(d);
 
-      {modal==='admin'&&(
-        <div
-          className="shade"
-          onMouseDown={e=>e.target===e.currentTarget&&M('')}
-        >
-          <section className="dialog admin">
-            <button className="close" onClick={()=>M('')}>
-              <X/>
-            </button>
+const left=(r,now)=>{
+  if(!r?.cycle_started_at)return D;
+  let e=Math.max(0,Math.floor((now-new Date(r.cycle_started_at).getTime())/1000));
+  return D-e%D;
+};
 
-            <h2><Users/> Yönetici Paneli</h2>
+const invasionClock=(r,now)=>{
+  if(!r?.cycle_started_at)return {remaining:0,phase:'idle'};
+  const elapsed=Math.max(0,Math.floor((now-new Date(r.cycle_started_at).getTime())/1000));
+  if(elapsed<INVASION_PHASE)return {remaining:INVASION_PHASE-elapsed,phase:'green'};
+  if(elapsed<INVASION_TOTAL)return {remaining:INVASION_TOTAL-elapsed,phase:'red'};
+  return {remaining:0,phase:'red'};
+};
 
-            <form className="add" onSubmit={add}>
-              <input
-                placeholder="Kullanıcı adı"
-                value={newU}
-                onChange={e=>NU(e.target.value)}
-                required
-                minLength="3"
-              />
+function App(){
+  const[session,S]=useState(null);
+  const[rows,R]=useState([]);
+  const[invasionRows,IR]=useState([]);
+  const[activeTab,AT]=useState('metin');
+  const[now,N]=useState(Date.now());
+  const[user,U]=useState('');
+  const[pass,P]=useState('');
+  const[err,E]=useState('');
+  const[modal,M]=useState('');
+  const[target,T]=useState('');
+  const[mins,Q]=useState('60');
+  const[users,V]=useState([]);
+  const[newU,NU]=useState('');
+  const[newP,NP]=useState('');
+  const[adminErr,AE]=useState('');
+  const[notice,NT]=useState(false);
 
-              <input
-                type="password"
-                placeholder="Şifre (en az 8 karakter)"
-                value={newP}
-                onChange={e=>NP(e.target.value)}
-                required
-                minLength="8"
-              />
+  const alerted=useRef(new Set());
+  const admin=session?.user?.app_metadata?.role==='admin';
+  const uname=session?.user?.user_metadata?.username||session?.user?.email?.split('@')[0]||'Üye';
 
-              <button className="primary">
-                <Plus/>Üye Ekle
-              </button>
-            </form>
+  const load=useCallback(async()=>{
+    if(!db||!session)return;
+    const[{data:metin,error:metinError},{data:invasion,error:invasionError}]=await Promise.all([
+      db.from('channel_state').select('*').order('channel'),
+      db.from('invasion_state').select('*').order('channel')
+    ]);
+    if(!metinError&&metin)R(metin);
+    if(!invasionError&&invasion)IR(invasion);
+    if(invasionError)console.error('İstila verileri alınamadı:',invasionError.message);
+  },[session]);
 
-            {adminErr&&<div className="error">{adminErr}</div>}
+  useEffect(()=>{
+    if(!db)return;
+    db.auth.getSession().then(({data})=>S(data.session));
+    const{data:l}=db.auth.onAuthStateChange((_,s)=>{
+      S(s);
+      R([]);
+      IR([]);
+    });
+    return()=>l.subscription.unsubscribe();
+  },[]);
 
-            {users.map(u=>(
-              <div className="user" key={u.id}>
-                <span>
-                  {u.username} {u.role==='admin'?'(Admin)':''}
-                </span>
+  useEffect(()=>{
+    if(!session)return;
+    load();
+    const c=db.channel('boss-tracking-live')
+      .on('postgres_changes',{event:'*',schema:'public',table:'channel_state'},p=>{
+        const n=p.new;
+        if(n?.channel){
+          R(old=>old.some(x=>x.channel===n.channel)
+            ?old.map(x=>x.channel===n.channel?n:x)
+            :[...old,n].sort((a,b)=>a.channel.localeCompare(b.channel)));
+        }
+      })
+      .on('postgres_changes',{event:'*',schema:'public',table:'invasion_state'},p=>{
+        const n=p.new;
+        if(n?.channel){
+          IR(old=>old.some(x=>x.channel===n.channel)
+            ?old.map(x=>x.channel===n.channel?n:x)
+            :[...old,n].sort((a,b)=>a.channel.localeCompare(b.channel)));
+        }
+      }).subscribe();
 
-                <div>
-                  <button onClick={()=>pw(u.id)} title="Şifre değiştir">
-                    <KeyRound/>
-                  </button>
+    return()=>db.removeChannel(c);
+  },[session,load]);
 
-                  {u.role!=='admin'&&
-                    <button onClick={()=>del(u.id)} title="Sil">
-                      <Trash2/>
-                    </button>
-                  }
-                </div>
-              </div>
-            ))}
-          </section>
-        </div>
-      )}
-    </main>
-  );
-}
+  useEffect(()=>{
+    let id=setInterval(()=>N(Date.now()),250);
+    return()=>clearInterval(id);
+  },[]);
 
-createRoot(document.getElementById('root')).render(<App/>);
+  useEffect(()=>{
+    if(!session)return;
+
+    rows.forEach(r=>{
+      let x=left(r,now);
+      let k=r.channel+':'+r.cycle_started_at;
+
+      if(x<=180&&x>0&&!alerted.current.has(k)){
+        alerted.current.add(k);
+
+        try{
+          let C=window.AudioContext||window.webkitAudioContext;
+          let c=new C();
