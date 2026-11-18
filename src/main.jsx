@@ -1,4 +1,3 @@
-
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createClient} from '@supabase/supabase-js';
